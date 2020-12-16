@@ -100,5 +100,5 @@ class BertEncoderBlock(nn.Module):
     def __call__(self, inputs, attention_mask):
         qkv_features = self.qkv_features or inputs.shape[-1]
         out_features = self.out_features or inputs.shape[-1]
-        self_attn = SelfAttention(self.num_heads,qkv_features,out_features,name="attention")(inputs,attention_mask)
+        self_attn = SelfAttention(self.num_heads,qkv_features = qkv_features,out_features = out_features,name="attention")(inputs,attention_mask)
         return FFNWithNorm(self.intermediate_size)(nn.LayerNorm(name="LayerNorm")(self_attn+inputs))
