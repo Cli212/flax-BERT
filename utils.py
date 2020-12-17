@@ -8,29 +8,15 @@ CONFIG_NAME = "config.json"
 MODEL_CARD_NAME = "modelcard.json"
 logger = logging.getLogger(__name__)
 
-# coding=utf-8
-# Copyright 2018 The Google AI Language Team Authors and The HuggingFace Inc. team.
-# Copyright (c) 2018, NVIDIA CORPORATION.  All rights reserved.
-#
-# Licensed under the Apache License, Version 2.0 (the "License");
-# you may not use this file except in compliance with the License.
-# You may obtain a copy of the License at
-#
-#     http://www.apache.org/licenses/LICENSE-2.0
-#
-# Unless required by applicable law or agreed to in writing, software
-# distributed under the License is distributed on an "AS IS" BASIS,
-# WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-# See the License for the specific language governing permissions and
-# limitations under the License.
 """ Configuration base class and utilities."""
 
 
 import copy
 import json
 import os
-from typing import Any, Dict, Tuple
-
+from typing import Any, Dict, Tuple, Optional, List
+from jax import numpy as jnp
+import numpy as np
 # from .file_utils import CONFIG_NAME, cached_path, hf_bucket_url, is_remote_url
 import logging
 
@@ -545,5 +531,83 @@ class BertConfig(object):
         """
         for key, value in config_dict.items():
             setattr(self, key, value)
+class FlaxDataCollatorForLanguageModeling:
+    """
+    Data collator used for language modeling. Inputs are dynamically padded to the maximum length of a batch if they
+    are not all of the same length.
+    Args:
+        tokenizer (:class:`~transformers.PreTrainedTokenizer` or :class:`~transformers.PreTrainedTokenizerFast`):
+            The tokenizer used for encoding the data.
+        mlm (:obj:`bool`, `optional`, defaults to :obj:`True`):
+            Whether or not to use masked language modeling. If set to :obj:`False`, the labels are the same as the
+            inputs with the padding tokens ignored (by setting them to -100). Otherwise, the labels are -100 for
+            non-masked tokens and the value to predict for the masked token.
+        mlm_probability (:obj:`float`, `optional`, defaults to 0.15):
+            The probability with which to (randomly) mask tokens in the input, when :obj:`mlm` is set to :obj:`True`.
+    .. note::
+        For best performance, this data collator should be used with a dataset having items that are dictionaries or
+        BatchEncoding, with the :obj:`"special_tokens_mask"` key, as returned by a
+        :class:`~transformers.PreTrainedTokenizer` or a :class:`~transformers.PreTrainedTokenizerFast` with the
+        argument :obj:`return_special_tokens_mask=True`.
+    """
+
+
+    def __init__(self, tokenizer, mlm: bool = True, mlm_probability:float = 0.15):
+        self.tokenizer = tokenizer
+        self.mlm = mlm
+        self.mlm_probability = mlm_probability
+
+    def __post_init__(self):
+        if self.mlm and self.tokenizer.mask_token is None:
+            raise ValueError(
+                "This tokenizer does not have a mask token which is necessary for masked language modeling. "
+                "You should pass `mlm=False` to train on causal language modeling instead."
+            )
+
+    def __call__(self, examples: List[Dict[str, np.ndarray]], pad_to_multiple_of: int) -> Dict[str, np.ndarray]:
+        # Handle dict or lists with proper padding and conversion to tensor.
+        batch = self.tokenizer.pad(examples, pad_to_multiple_of=pad_to_multiple_of, return_tensors="numpy")
+
+        # If special token mask has been preprocessed, pop it from the dict.
+        special_tokens_mask = batch.pop("special_tokens_mask", None)
+        if self.mlm:
+            batch["input_ids"], batch["labels"] = self.mask_tokens(
+                batch["input_ids"], special_tokens_mask=special_tokens_mask
+            )
+        else:
+            labels = batch["input_ids"].copy()
+            if self.tokenizer.pad_token_id is not None:
+                labels[labels == self.tokenizer.pad_token_id] = -100
+            batch["labels"] = labels
+        return batch
+
+    def mask_tokens(
+        self, inputs: np.ndarray, special_tokens_mask: Optional[np.ndarray]
+    ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        """
+        Prepare masked tokens inputs/labels for masked language modeling: 80% MASK, 10% random, 10% original.
+        """
+        labels = inputs.copy()
+        # We sample a few tokens in each sequence for MLM training (with probability `self.mlm_probability`)
+        probability_matrix = np.full(labels.shape, self.mlm_probability)
+        special_tokens_mask = special_tokens_mask.astype("bool")
+
+        probability_matrix[special_tokens_mask] = 0.0
+        masked_indices = np.random.binomial(1, probability_matrix).astype("bool")
+        labels[~masked_indices] = -100  # We only compute loss on masked tokens
+
+        # 80% of the time, we replace masked input tokens with tokenizer.mask_token ([MASK])
+        indices_replaced = np.random.binomial(1, np.full(labels.shape, 0.8)).astype("bool") & masked_indices
+        inputs[indices_replaced] = self.tokenizer.convert_tokens_to_ids(self.tokenizer.mask_token)
+
+        # 10% of the time, we replace masked input tokens with random word
+        indices_random = np.random.binomial(1, np.full(labels.shape, 0.5)).astype("bool")
+        indices_random &= masked_indices & ~indices_replaced
+
+        random_words = np.random.randint(self.tokenizer.vocab_size, size=labels.shape, dtype="i4")
+        inputs[indices_random] = random_words[indices_random]
+
+        # The rest of the time (10% of the time) we keep the masked input tokens unchanged
+        return inputs, labels
 
 
