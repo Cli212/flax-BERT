@@ -2,12 +2,13 @@ import jax
 from jax.random import PRNGKey
 from flax.traverse_util import unflatten_dict
 from jax import lax, random, numpy as jnp
-from flax.core.frozen_dict import freeze
+from flax.core.frozen_dict import freeze, FrozenDict
 import layers
+from layers import FlaxBertModule, FlaxBertOnlyMLMHead, FlaxBertForMaskedLMModule
 import numpy as np
 from flax import linen as nn
 from flax.linen import compact
-from typing import Callable, Optional, Dict
+from typing import Callable, Optional, Dict, Tuple
 import json
 from utils import BertConfig
 import os
@@ -43,9 +44,13 @@ class BertModule(nn.Module):
         self.cls = BertOnlyMLMHead(self.hidden_size, self.vocab_size, self.hidden_size)
 
     @compact
-    def __call__(self, token_ids, position_ids, token_type_ids, attention_mask):
+    def __call__(self, input_ids, token_type_ids, position_ids, attention_mask):
+        input_ids = jnp.array(input_ids,dtype="i4")
+        position_ids = jnp.array(position_ids,dtype="i4")
+        token_type_ids = jnp.array(token_type_ids,dtype="i4")
+        attention_mask = jnp.array(attention_mask,dtype="i4")
         embeddings = BertEmbedding(self.vocab_size, self.max_length, self.type_vocab_size, self.hidden_size,
-                                   name="embeddings")(token_ids,
+                                   name="embeddings")(input_ids,
                                                       position_ids,
                                                       token_type_ids)
         output = embeddings
@@ -108,7 +113,7 @@ class FlaxBertPooler(nn.Module):
 BERT_INPUTS_DOCSTRING = r""
 
 
-class FlaxBertForPretrained():
+class FlaxBertForPretrained(object):
     """
     The model can behave as an encoder (with only self-attention) as well as a decoder, in which case a layer of
     cross-attention is added between the self-attention layers, following the architecture described in `Attention is
@@ -148,10 +153,8 @@ class FlaxBertForPretrained():
                 import torch
                 state = torch.load(f)
                 state = {k: v.numpy() for k, v in state.items()}
-                cls.state1 = state.copy()
                 state = cls.convert_from_pytorch(state, config)
-                cls.state2 = state.copy()
-                state = unflatten_dict({tuple(k.split(".")[1:]): v for k, v in state.items()})
+                state = unflatten_dict({tuple(k.split(".")[0:]): v for k, v in state.items()})
             except BaseException:
                 raise EnvironmentError(
                     f"Unable to convert model {archive_file} to Flax deserializable object. "
@@ -165,6 +168,109 @@ class FlaxBertForPretrained():
             text = reader.read()
         return json.loads(text)
 
+    # @staticmethod
+    # def convert_from_pytorch(pt_state: Dict, config: BertConfig) -> Dict:
+    #     jax_state = dict(pt_state)
+    #
+    #     # Need to change some parameters name to match Flax names so that we don't have to fork any layer
+    #     for key, tensor in pt_state.items():
+    #         # Key parts
+    #         key_parts = set(key.split("."))
+    #
+    #         if "attention.self" in key:
+    #             del jax_state[key]
+    #             key = key.replace("attention.self", "attention")
+    #             # tensor = jnp.asarray(tensor)
+    #             jax_state[key] = tensor
+    #
+    #         # Every dense layer has "kernel" parameters instead of "weight"
+    #         if "dense.weight" in key:
+    #             del jax_state[key]
+    #             key = key.replace("weight", "kernel")
+    #             # tensor = jnp.asarray(tensor)
+    #             jax_state[key] = tensor
+    #
+    #         # SelfAttention needs also to replace "weight" by "kernel"
+    #         if {"query", "key", "value"} & key_parts:
+    #
+    #             # Flax SelfAttention decomposes the heads (num_head, size // num_heads)
+    #             if "bias" in key:
+    #                 jax_state[key] = tensor.reshape((config.num_attention_heads, -1))
+    #             elif "weight" in key:
+    #                 del jax_state[key]
+    #                 key = key.replace("weight", "kernel")
+    #                 tensor = tensor.reshape((config.num_attention_heads, -1, config.hidden_size)).transpose((2, 0, 1))
+    #                 jax_state[key] = tensor
+    #
+    #         # SelfAttention output is not a separate layer, remove one nesting
+    #         # if "attention.output.dense" in key:
+    #         #     del jax_state[key]
+    #         #     key = key.replace("attention.output.dense", "attention.out")
+    #         #     jax_state[key] = tensor
+    #
+    #         # SelfAttention output is not a separate layer, remove nesting on layer norm
+    #         # if "attention.output.LayerNorm" in key:
+    #         #     del jax_state[key]
+    #         #     key = key.replace("attention.output.LayerNorm", "LayerNorm")
+    #         #     jax_state[key] = tensor
+    #
+    #         # There are some transposed parameters w.r.t their PyTorch counterpart
+    #         # TBD
+    #
+    #         if "intermediate.dense" in key:
+    #             del jax_state[key]
+    #             key = key.replace("intermediate.dense", "FFNWithNorm_0.intermediate.dense")
+    #             jax_state[key] = tensor.T
+    #
+    #         # Self Attention output projection needs to be transposed
+    #
+    #         # Pooler needs to transpose its kernel
+    #         if "pooler.dense.kernel" in key:
+    #             jax_state[key] = tensor.T
+    #
+    #         # Handle LayerNorm conversion
+    #         if "LayerNorm" in key:
+    #             del jax_state[key]
+    #
+    #             # # Replace LayerNorm by layer_norm
+    #             # new_key = key.replace("LayerNorm", "layer_norm")
+    #             if "gamma" in key:
+    #                 key = key.replace("gamma", "scale")
+    #                 # new_key = key.replace("weight","gamma")
+    #             elif "beta" in key:
+    #                 key = key.replace("beta", "bias")
+    #                 # new_key = key.replace("bias","beta")
+    #
+    #             jax_state[key] = tensor
+    #
+    #         if "output.LayerNorm" in key:
+    #             del jax_state[key]
+    #             if "attention" in key:
+    #                 key = key.replace("attention.output.LayerNorm", "LayerNorm")
+    #             else:
+    #                 key = key.replace("output.LayerNorm", "FFNWithNorm_0.LayerNorm")
+    #             jax_state[key] = tensor
+    #
+    #         if "output.dense" in key:
+    #             del jax_state[key]
+    #             if "attention" in key:
+    #                 key = key.replace("attention.output.dense", "attention.out")
+    #                 jax_state[key] = tensor
+    #             else:
+    #                 key = key.replace("output.dense", "FFNWithNorm_0.output.dense")
+    #                 jax_state[key] = tensor.T
+    #
+    #         if "out.kernel" in key:
+    #             jax_state[key] = tensor.reshape((config.hidden_size, config.num_attention_heads, -1)).transpose(
+    #                 1, 2, 0
+    #             )
+    #         if "decoder.weight" in key:
+    #             del jax_state[key]
+    #             key = key.replace("weight", "kernel")
+    #             jax_state[key] = tensor
+    #
+    #     return jax_state
+
     @staticmethod
     def convert_from_pytorch(pt_state: Dict, config: BertConfig) -> Dict:
         jax_state = dict(pt_state)
@@ -173,17 +279,16 @@ class FlaxBertForPretrained():
         for key, tensor in pt_state.items():
             # Key parts
             key_parts = set(key.split("."))
-
-            if "attention.self" in key:
-                del jax_state[key]
-                key = key.replace("attention.self", "attention")
-                jax_state[key] = jax.numpy.asarray(tensor)
-
             # Every dense layer has "kernel" parameters instead of "weight"
             if "dense.weight" in key:
                 del jax_state[key]
                 key = key.replace("weight", "kernel")
-                jax_state[key] = jax.numpy.asarray(tensor)
+                jax_state[key] = tensor
+
+            if "decoder.weight" in key:
+                del jax_state[key]
+                key = key.replace("weight", "kernel")
+                jax_state[key] = tensor.T
 
             # SelfAttention needs also to replace "weight" by "kernel"
             if {"query", "key", "value"} & key_parts:
@@ -191,98 +296,78 @@ class FlaxBertForPretrained():
                 # Flax SelfAttention decomposes the heads (num_head, size // num_heads)
                 if "bias" in key:
                     jax_state[key] = tensor.reshape((config.num_attention_heads, -1))
-                elif "weight" in key:
+                elif "weight":
                     del jax_state[key]
                     key = key.replace("weight", "kernel")
                     tensor = tensor.reshape((config.num_attention_heads, -1, config.hidden_size)).transpose((2, 0, 1))
                     jax_state[key] = tensor
 
             # SelfAttention output is not a separate layer, remove one nesting
-            # if "attention.output.dense" in key:
-            #     del jax_state[key]
-            #     key = key.replace("attention.output.dense", "attention.out")
-            #     jax_state[key] = tensor
+            if "attention.output.dense" in key:
+                del jax_state[key]
+                key = key.replace("attention.output.dense", "attention.self.out")
+                jax_state[key] = tensor
 
             # SelfAttention output is not a separate layer, remove nesting on layer norm
-            # if "attention.output.LayerNorm" in key:
-            #     del jax_state[key]
-            #     key = key.replace("attention.output.LayerNorm", "LayerNorm")
-            #     jax_state[key] = tensor
+            if "attention.output.LayerNorm" in key:
+                del jax_state[key]
+                key = key.replace("attention.output.LayerNorm", "attention.LayerNorm")
+                jax_state[key] = tensor
 
             # There are some transposed parameters w.r.t their PyTorch counterpart
-            # TBD
-
-            if "intermediate.dense" in key:
-                del jax_state[key]
-                key = key.replace("intermediate.dense", "FFNWithNorm_0.intermediate.dense")
+            if "intermediate.dense.kernel" in key or "output.dense.kernel" in key or "transform.dense.kernel" in key:
                 jax_state[key] = tensor.T
 
             # Self Attention output projection needs to be transposed
+            if "out.kernel" in key:
+                jax_state[key] = tensor.reshape((config.hidden_size, config.num_attention_heads, -1)).transpose(
+                    1, 2, 0
+                )
 
             # Pooler needs to transpose its kernel
             if "pooler.dense.kernel" in key:
                 jax_state[key] = tensor.T
 
+            # Hack to correctly load some pytorch models
+            if "predictions.bias" in key:
+                del jax_state[key]
+                jax_state[".".join(key.split(".")[:2]) + ".decoder.bias"] = tensor
+
             # Handle LayerNorm conversion
             if "LayerNorm" in key:
                 del jax_state[key]
 
-                # # Replace LayerNorm by layer_norm
-                # new_key = key.replace("LayerNorm", "layer_norm")
+                # Replace LayerNorm by layer_norm
+                new_key = key.replace("LayerNorm", "layer_norm")
+
                 if "gamma" in key:
-                    key = key.replace("gamma", "scale")
-                    # new_key = key.replace("weight","gamma")
+                    new_key = new_key.replace("gamma", "scale")
                 elif "beta" in key:
-                    key = key.replace("beta", "bias")
-                    # new_key = key.replace("bias","beta")
+                    new_key = new_key.replace("beta", "bias")
 
-                jax_state[key] = tensor
-
-            if "output.LayerNorm" in key:
-                del jax_state[key]
-                if "attention" in key:
-                    key = key.replace("attention.output.LayerNorm", "LayerNorm")
-                else:
-                    key = key.replace("output.LayerNorm", "FFNWithNorm_0.LayerNorm")
-                jax_state[key] = tensor
-
-            if "output.dense" in key:
-                del jax_state[key]
-                if "attention" in key:
-                    key = key.replace("attention.output.dense", "attention.out")
-                    jax_state[key] = tensor
-                else:
-                    key = key.replace("output.dense", "FFNWithNorm_0.output.dense")
-                    jax_state[key] = tensor.T
-
-            if "out.kernel" in key:
-                jax_state[key] = tensor.reshape((config.hidden_size, config.num_attention_heads, -1)).transpose(
-                    1, 2, 0
-                )
-            if "decoder.weight" in key:
-                del jax_state[key]
-                key = key.replace("weight", "kernel")
-                jax_state[key] = tensor.T
+                jax_state[new_key] = tensor
 
         return jax_state
 
     def __init__(self, config: BertConfig, state: dict, seed: int = 0, **kwargs):
-        for i in range(config.num_hidden_layers):
-            state[f"encoder.layer.{i}"] = state["encoder"]["layer"][str(i)]
-            state[f"encoder.layer.{i}"]["FFNWithNorm_0"]["intermediate.dense"] \
-                = state[f"encoder.layer.{i}"]["FFNWithNorm_0"]["intermediate"]["dense"]
-            state[f"encoder.layer.{i}"]["FFNWithNorm_0"]["output.dense"] \
-                = state[f"encoder.layer.{i}"]["FFNWithNorm_0"]["output"]["dense"]
-        state["cls"] = {}
-        state["cls"]["predictions"] = state["predictions"]
-        model = BertModule(
+        # for i in range(config.num_hidden_layers):
+        #     state[f"encoder.layer.{i}"] = state["encoder"]["layer"][str(i)]
+        #     state[f"encoder.layer.{i}"]["FFNWithNorm_0"]["intermediate.dense"] \
+        #         = state[f"encoder.layer.{i}"]["FFNWithNorm_0"]["intermediate"]["dense"]
+        #     state[f"encoder.layer.{i}"]["FFNWithNorm_0"]["output.dense"] \
+        #         = state[f"encoder.layer.{i}"]["FFNWithNorm_0"]["output"]["dense"]
+        # state["cls"] = {}
+        # state["cls"]["predictions"] = state["predictions"]
+        model = FlaxBertForMaskedLMModule(
             vocab_size=config.vocab_size,
             hidden_size=config.hidden_size,
             type_vocab_size=config.type_vocab_size,
             max_length=config.max_position_embeddings,
             num_encoder_layers=config.num_hidden_layers,
             num_heads=config.num_attention_heads,
+            head_size=config.hidden_size,
             intermediate_size=config.intermediate_size,
+            dropout_rate=config.hidden_dropout_prob,
             hidden_act=config.hidden_act
         )
 
@@ -299,13 +384,22 @@ class FlaxBertForPretrained():
         # Those are public as their type is generic to every derived classes.
         self.key = PRNGKey(seed)
         self.params = state
-        self.model = model
+
+    def init(self, rng: jax.random.PRNGKey, input_shape: Tuple) -> FrozenDict:
+        input_ids, attention_mask, token_type_ids, position_ids = self._check_inputs(
+            jnp.zeros(input_shape, dtype="i4"), None, None, None
+        )
+
+        params_rng, dropout_rng = jax.random.split(rng)
+        rngs = {"params": params_rng, "dropout": dropout_rng}
+
+        return self.module.init(rngs, input_ids, attention_mask, token_type_ids, position_ids)["params"]
 
     @property
     def module(self) -> nn.Module:
         return self._module
 
-    def __call__(self, input_ids, attention_mask=None, token_type_ids=None, position_ids=None):
+    def __call__(self, input_ids, attention_mask=None, token_type_ids=None, position_ids=None,dropout_rng=None,train=False):
         if token_type_ids is None:
             token_type_ids = jnp.ones_like(input_ids)
 
@@ -315,12 +409,17 @@ class FlaxBertForPretrained():
         if attention_mask is None:
             attention_mask = jnp.ones_like(input_ids)
         params_input = freeze({"params": self.params})
-        return self.model.apply(
+        rngs = {}
+        if dropout_rng is not None:
+            rngs["dropout"] = dropout_rng
+        return self._module.apply(
             params_input,
             jnp.array(input_ids, dtype="i4"),
             jnp.array(attention_mask, dtype="i4"),
             jnp.array(token_type_ids, dtype="i4"),
             jnp.array(position_ids, dtype="i4"),
+            not train,
+            rngs=rngs,
         )
 
 
@@ -355,7 +454,7 @@ class BertLMPredictionHead(nn.Module):
 
     @compact
     def __call__(self, inputs):
-        decoder = nn.DenseGeneral(features=self.vocab_size, axis=-1, name="decoder", use_bias=False)
+        decoder = nn.Dense(features=self.vocab_size, name="decoder", use_bias=False)
         return decoder(self.transform(inputs))
 
 
@@ -377,14 +476,14 @@ class FlaxBertPredictMask:
     """This model is used for get the prediction result of MLM with the built
     model and tokenizer"""
 
-    def __init__(self, model, tokenizer, top_k=5):
+    def __init__(self, model: FlaxBertForPretrained, tokenizer, top_k=5):
         self.model = model
         self.tokenizer = tokenizer
         self.top_k = top_k
 
     def __call__(self, sentence):
         inputs = self.tokenizer(sentence, return_tensors=TensorType.JAX)
-        logits = self.model(**inputs)
+        logits = self.model(**inputs)[0]
         scores = nn.softmax(logits, axis=-1)
         # values, predictions = scores.topk(self.top_k)
         values, predictions = lax.top_k(scores, self.top_k)
