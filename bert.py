@@ -392,14 +392,13 @@ class FlaxBertForPretrained(object):
 
         params_rng, dropout_rng = jax.random.split(rng)
         rngs = {"params": params_rng, "dropout": dropout_rng}
-
-        return self.module.init(rngs, input_ids, attention_mask, token_type_ids, position_ids)["params"]
+        return self._module.init(rngs, input_ids, attention_mask, token_type_ids, position_ids)["params"]
 
     @property
     def module(self) -> nn.Module:
         return self._module
 
-    def __call__(self, input_ids, attention_mask=None, token_type_ids=None, position_ids=None,dropout_rng=None,train=False):
+    def __call__(self, input_ids, attention_mask=None, token_type_ids=None, position_ids=None,dropout_rng=None,train=False, params = None):
         if token_type_ids is None:
             token_type_ids = jnp.ones_like(input_ids)
 
@@ -408,7 +407,7 @@ class FlaxBertForPretrained(object):
 
         if attention_mask is None:
             attention_mask = jnp.ones_like(input_ids)
-        params_input = freeze({"params": self.params})
+        params_input = freeze({"params": params or self.params})
         rngs = {}
         if dropout_rng is not None:
             rngs["dropout"] = dropout_rng
