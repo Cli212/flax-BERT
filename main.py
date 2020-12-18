@@ -127,7 +127,7 @@ def training_step(optimizer, batch, dropout_rng):
         # Hide away tokens which doesn't participate in the optimization
         token_mask = jnp.where(targets > 0, 1.0, 0.0)
 
-        logits = model(**batch, params=params, dropout_rng=dropout_rng, train=True)[0]
+        logits = model(**batch, params=params, dropout_rng=dropout_rng, train=args.train)[0]
         loss, weight_sum = cross_entropy(logits, targets, token_mask)
         return loss / weight_sum
 
@@ -146,7 +146,7 @@ if __name__ == "__main__":
     parser.add_argument("--seed",type=int,default=0)
     parser.add_argument("--model",type=str,required=True)
     parser.add_argument("--dataset",type=str,default="wikitext")
-    parser.add_argument("--dataset_config", type=str, default="wikitext-2-v1")
+    parser.add_argument("--dataset_config", type=str, default="wikitext-2-raw-v1")
     parser.add_argument("--train", default=True, type=bool)
     parser.add_argument("--batch_size",type=int, default=32)
     parser.add_argument("--warmup_steps",type=int, default=5)
@@ -166,7 +166,7 @@ if __name__ == "__main__":
     column_names = datasets['train'].column_names if args.train else datasets['validation'].column_names
     ## This place needs a customized setting
     text_column_name = "text" if "text" in column_names else column_names[0]
-    tokenized_datasets = datasets.map(tokenized_function, input_columns=[text_column_name], batched=True)
+    tokenized_datasets = datasets.map(tokenized_function, input_columns=[text_column_name], batched=True, remove_columns=column_names)
     p_training_step = jax.pmap(train_step, "batch", donate_argnums=(0,))
     optimizer = jax_utils.replicate(optimizer)
     dropout_rngs = random.split(rng, jax.local_device_count())
