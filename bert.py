@@ -10,10 +10,9 @@ from flax import linen as nn
 from flax.linen import compact
 from typing import Callable, Optional, Dict, Tuple
 import json
-from utils import BertConfig
 import os
 import logging
-from transformers import TensorType
+from transformers import TensorType, BertConfig
 
 
 WEIGHTS_NAME = "pytorch_model.bin"
@@ -411,6 +410,7 @@ class FlaxBertForPretrained(object):
         rngs = {}
         if dropout_rng is not None:
             rngs["dropout"] = dropout_rng
+
         return self._module.apply(
             params_input,
             jnp.array(input_ids, dtype="i4"),

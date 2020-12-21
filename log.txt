@@ -1,0 +1,15 @@
+2020-12-19 12:41:12,418 - log - INFO - Load dataset
+2020-12-19 12:42:06,884 - log - INFO - Load dataset
+2020-12-19 12:49:35,936 - log - INFO - Start training
+2020-12-19 12:52:16,057 - log - INFO - Load dataset
+2020-12-19 12:59:58,600 - log - INFO - Start training
+2020-12-21 11:40:45,248 - log - INFO - Load dataset
+2020-12-21 11:41:01,071 - log - INFO - Start training
+2020-12-21 11:48:00,605 - log - INFO - Load dataset
+2020-12-21 11:48:44,957 - log - INFO - Load dataset
+2020-12-21 11:51:34,151 - log - INFO - Start training
+2020-12-21 11:54:10,211 - log - INFO - Load dataset
+2020-12-21 11:54:21,381 - log - INFO - Start training
+2020-12-21 11:58:22,543 - log - INFO - Load dataset
+2020-12-21 11:58:33,434 - log - INFO - Start training
+2020-12-21 12:17:22,243 - log - INFO - Load dataset

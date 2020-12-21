@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="PublishConfigData" serverName="g4-12" remoteFilesAllowedToDisappearOnAutoupload="false">
+    <serverData>
+      <paths name="g4-12">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/code/flax-BERT" local="$PROJECT_DIR$" web="/" />
+            <mapping deploy="" local="" />
+          </mappings>
+        </serverdata>
+      </paths>
+      <paths name="ubuntu@44.234.231.23:22 key">
+        <serverdata>
+          <mappings>
+            <mapping deploy="/home/ubuntu/code/flax-BERT" local="$PROJECT_DIR$" />
+          </mappings>
+        </serverdata>
+      </paths>
+    </serverData>
+  </component>
+</project>
