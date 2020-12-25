@@ -469,6 +469,9 @@ class FFNWithNorm(nn.Module):
         middle = act_fn(nn.Dense(self.hidden_size,name="intermediate.dense")(inputs))
         last = nn.Dense(inputs.shape[-1],name="output.dense")(middle)
         return nn.LayerNorm(name="LayerNorm")(inputs+last)
+
+from flax.linen import SelfAttention
+
 class BertEncoderBlock(nn.Module):
     vocab_size: int
     hidden_size: int

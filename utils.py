@@ -1,5 +1,4 @@
-import torch
-import os
+
 import logging
 from flax import linen as nn
 WEIGHTS_NAME = "pytorch_model.bin"
@@ -10,17 +9,13 @@ MODEL_CARD_NAME = "modelcard.json"
 logger = logging.getLogger(__name__)
 
 """ Configuration base class and utilities."""
-
-
-import copy
-import json
-import os
-from typing import Any, Dict, Tuple, Optional, List
+from typing import Any, Dict, Tuple, Optional, List, NamedTuple
 from jax import numpy as jnp
 import numpy as np
 from flax.training import common_utils
-# from .file_utils import CONFIG_NAME, cached_path, hf_bucket_url, is_remote_url
+import jax
 import logging
+from flax import optim
 
 
 logger = logging.getLogger(__name__)
@@ -139,15 +134,15 @@ def cross_entropy(logits, targets, weights = None, label_smoothing = 0.0):
     low_confidence = (1.0 - confidence) / (vocab_size - 1)
     normalizing_constant = -(
             confidence * jnp.log(confidence) + (vocab_size - 1) * low_confidence * jnp.log(low_confidence + 1e-20)
-    )
+    ).astype(logits.dtype)
     soft_targets = common_utils.onehot(targets,vocab_size)
-    loss = -jnp.sum(soft_targets*nn.log_softmax(logits),axis=-1)
+    loss = -jnp.sum(soft_targets*nn.log_softmax(logits),axis=-1,dtype=logits.dtype)
     loss -= normalizing_constant
     if weights is not None:
         loss *= weights
         normalizing_factor = weights.sum()
     else:
-        normalizing_factor = np.prod(targets.shape,dtype="float32")
+        normalizing_factor = np.prod(targets.shape,dtype=logits.dtype)
     return loss.sum(),normalizing_factor
 
 def generate_batch_splits(samples_idx: jnp.ndarray, batch_size: int) -> jnp.ndarray:
@@ -212,3 +207,20 @@ def create_learning_rate_scheduler(
         return jnp.asarray(ret, dtype=jnp.float32)
 
     return step_fn
+
+def bytes_to_mega_bytes(memory_amount: int) -> int:
+    """ Utility to convert a number of bytes (int) into a number of mega bytes (int)
+    """
+    return memory_amount >> 20
+
+class Memory(NamedTuple):
+    """ `Memory` NamedTuple have a single field `bytes` and
+        you can get a human readable str of the number of mega bytes by calling `__repr__`
+            - `byte` (integer): number of bytes,
+    """
+
+    bytes: int
+
+    def __repr__(self) -> str:
+        return str(bytes_to_mega_bytes(self.bytes))
+

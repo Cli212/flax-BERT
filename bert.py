@@ -120,12 +120,9 @@ class FlaxBertForPretrained(object):
     Llion Jones, Aidan N. Gomez, Lukasz Kaiser and Illia Polosukhin.
     """
 
-    model_class = BertModule
-    config_class = BertConfig
-    base_model_prefix = "bert"
-
     @classmethod
-    def from_pretrained(cls,pretrained_model_path:str,*model_args,**kwargs):
+    def from_pretrained(cls,pretrained_model_path:str,
+                        dtype: jnp.dtype = jnp.float32,*model_args,**kwargs):
 
         r"""Instantiate a pretrained Flax model from a pre-trained model configuration."""
         config = BertConfig.from_pretrained(pretrained_model_path)
@@ -159,116 +156,13 @@ class FlaxBertForPretrained(object):
                     f"Unable to convert model {archive_file} to Flax deserializable object. "
                     "Supported format are PyTorch archive or Flax msgpack"
                 )
-        return cls(config,state,*model_args,**kwargs)
+        return cls(config,state,dtype = dtype,*model_args,**kwargs)
 
     @classmethod
     def _dict_from_json_file(cls, json_file: str):
         with open(json_file, "r", encoding="utf-8") as reader:
             text = reader.read()
         return json.loads(text)
-
-    # @staticmethod
-    # def convert_from_pytorch(pt_state: Dict, config: BertConfig) -> Dict:
-    #     jax_state = dict(pt_state)
-    #
-    #     # Need to change some parameters name to match Flax names so that we don't have to fork any layer
-    #     for key, tensor in pt_state.items():
-    #         # Key parts
-    #         key_parts = set(key.split("."))
-    #
-    #         if "attention.self" in key:
-    #             del jax_state[key]
-    #             key = key.replace("attention.self", "attention")
-    #             # tensor = jnp.asarray(tensor)
-    #             jax_state[key] = tensor
-    #
-    #         # Every dense layer has "kernel" parameters instead of "weight"
-    #         if "dense.weight" in key:
-    #             del jax_state[key]
-    #             key = key.replace("weight", "kernel")
-    #             # tensor = jnp.asarray(tensor)
-    #             jax_state[key] = tensor
-    #
-    #         # SelfAttention needs also to replace "weight" by "kernel"
-    #         if {"query", "key", "value"} & key_parts:
-    #
-    #             # Flax SelfAttention decomposes the heads (num_head, size // num_heads)
-    #             if "bias" in key:
-    #                 jax_state[key] = tensor.reshape((config.num_attention_heads, -1))
-    #             elif "weight" in key:
-    #                 del jax_state[key]
-    #                 key = key.replace("weight", "kernel")
-    #                 tensor = tensor.reshape((config.num_attention_heads, -1, config.hidden_size)).transpose((2, 0, 1))
-    #                 jax_state[key] = tensor
-    #
-    #         # SelfAttention output is not a separate layer, remove one nesting
-    #         # if "attention.output.dense" in key:
-    #         #     del jax_state[key]
-    #         #     key = key.replace("attention.output.dense", "attention.out")
-    #         #     jax_state[key] = tensor
-    #
-    #         # SelfAttention output is not a separate layer, remove nesting on layer norm
-    #         # if "attention.output.LayerNorm" in key:
-    #         #     del jax_state[key]
-    #         #     key = key.replace("attention.output.LayerNorm", "LayerNorm")
-    #         #     jax_state[key] = tensor
-    #
-    #         # There are some transposed parameters w.r.t their PyTorch counterpart
-    #         # TBD
-    #
-    #         if "intermediate.dense" in key:
-    #             del jax_state[key]
-    #             key = key.replace("intermediate.dense", "FFNWithNorm_0.intermediate.dense")
-    #             jax_state[key] = tensor.T
-    #
-    #         # Self Attention output projection needs to be transposed
-    #
-    #         # Pooler needs to transpose its kernel
-    #         if "pooler.dense.kernel" in key:
-    #             jax_state[key] = tensor.T
-    #
-    #         # Handle LayerNorm conversion
-    #         if "LayerNorm" in key:
-    #             del jax_state[key]
-    #
-    #             # # Replace LayerNorm by layer_norm
-    #             # new_key = key.replace("LayerNorm", "layer_norm")
-    #             if "gamma" in key:
-    #                 key = key.replace("gamma", "scale")
-    #                 # new_key = key.replace("weight","gamma")
-    #             elif "beta" in key:
-    #                 key = key.replace("beta", "bias")
-    #                 # new_key = key.replace("bias","beta")
-    #
-    #             jax_state[key] = tensor
-    #
-    #         if "output.LayerNorm" in key:
-    #             del jax_state[key]
-    #             if "attention" in key:
-    #                 key = key.replace("attention.output.LayerNorm", "LayerNorm")
-    #             else:
-    #                 key = key.replace("output.LayerNorm", "FFNWithNorm_0.LayerNorm")
-    #             jax_state[key] = tensor
-    #
-    #         if "output.dense" in key:
-    #             del jax_state[key]
-    #             if "attention" in key:
-    #                 key = key.replace("attention.output.dense", "attention.out")
-    #                 jax_state[key] = tensor
-    #             else:
-    #                 key = key.replace("output.dense", "FFNWithNorm_0.output.dense")
-    #                 jax_state[key] = tensor.T
-    #
-    #         if "out.kernel" in key:
-    #             jax_state[key] = tensor.reshape((config.hidden_size, config.num_attention_heads, -1)).transpose(
-    #                 1, 2, 0
-    #             )
-    #         if "decoder.weight" in key:
-    #             del jax_state[key]
-    #             key = key.replace("weight", "kernel")
-    #             jax_state[key] = tensor
-    #
-    #     return jax_state
 
     @staticmethod
     def convert_from_pytorch(pt_state: Dict, config: BertConfig) -> Dict:
@@ -348,7 +242,7 @@ class FlaxBertForPretrained(object):
 
         return jax_state
 
-    def __init__(self, config: BertConfig, state: dict, seed: int = 0, **kwargs):
+    def __init__(self, config: BertConfig, state: dict, seed: int = 0, dtype:jnp.dtype=jnp.float32,**kwargs):
         # for i in range(config.num_hidden_layers):
         #     state[f"encoder.layer.{i}"] = state["encoder"]["layer"][str(i)]
         #     state[f"encoder.layer.{i}"]["FFNWithNorm_0"]["intermediate.dense"] \
@@ -367,7 +261,8 @@ class FlaxBertForPretrained(object):
             head_size=config.hidden_size,
             intermediate_size=config.intermediate_size,
             dropout_rate=config.hidden_dropout_prob,
-            hidden_act=config.hidden_act
+            hidden_act=config.hidden_act,
+            dtype = dtype,
         )
 
         if config is None:
@@ -384,14 +279,14 @@ class FlaxBertForPretrained(object):
         self.key = PRNGKey(seed)
         self.params = state
 
-    def init(self, rng: jax.random.PRNGKey, input_shape: Tuple) -> FrozenDict:
-        input_ids, attention_mask, token_type_ids, position_ids = self._check_inputs(
-            jnp.zeros(input_shape, dtype="i4"), None, None, None
-        )
-
-        params_rng, dropout_rng = jax.random.split(rng)
-        rngs = {"params": params_rng, "dropout": dropout_rng}
-        return self._module.init(rngs, input_ids, attention_mask, token_type_ids, position_ids)["params"]
+    # def init(self, rng: jax.random.PRNGKey, input_shape: Tuple) -> FrozenDict:
+    #     input_ids, attention_mask, token_type_ids, position_ids = self._check_inputs(
+    #         jnp.zeros(input_shape, dtype="i4"), None, None, None
+    #     )
+    #
+    #     params_rng, dropout_rng = jax.random.split(rng)
+    #     rngs = {"params": params_rng, "dropout": dropout_rng}
+    #     return self._module.init(rngs, input_ids, attention_mask, token_type_ids, position_ids)["params"]
 
     @property
     def module(self) -> nn.Module:
@@ -406,20 +301,27 @@ class FlaxBertForPretrained(object):
 
         if attention_mask is None:
             attention_mask = jnp.ones_like(input_ids)
-        params_input = freeze({"params": params or self.params})
         rngs = {}
         if dropout_rng is not None:
             rngs["dropout"] = dropout_rng
-
         return self._module.apply(
-            params_input,
-            jnp.array(input_ids, dtype="i4"),
-            jnp.array(attention_mask, dtype="i4"),
-            jnp.array(token_type_ids, dtype="i4"),
-            jnp.array(position_ids, dtype="i4"),
+            freeze({"params": params or self.params}),
+            input_ids,
+            attention_mask,
+            token_type_ids,
+            position_ids,
             not train,
             rngs=rngs,
         )
+        # return self._module.apply(
+        #     params_input,
+        #     jnp.array(input_ids, dtype="i4"),
+        #     jnp.array(attention_mask, dtype="i4"),
+        #     jnp.array(token_type_ids, dtype="i4"),
+        #     jnp.array(position_ids, dtype="i4"),
+        #     not train,
+        #     rngs=rngs,
+        # )
 
 
 ACT2FN = {"gelu": nn.gelu,
