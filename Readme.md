@@ -1,4 +1,4 @@
-### User guide of Flax Bert
+### BERT implementation with [Jax](https://github.com/google/jax) ([Flax](https://flax.readthedocs.io/en/latest/))
 
 Use this comman to run: 
 
